@@ -21,7 +21,14 @@ const rooms = new Map<string, Set<WebSocket>>();
 app.prepare().then(() => {
   const expressApp = express();
   const server = createServer(expressApp);
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({ noServer: true });
+
+  // Handle WebSocket upgrade
+  server.on('upgrade', (request, socket, head) => {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  });
 
   // WebSocket setup
   wss.on('connection', (ws: WebSocket) => {
