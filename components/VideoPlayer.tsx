@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Pusher from 'pusher-js';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Upload, Send, Users, Video, Youtube } from 'lucide-react';
+import { Heart, Upload, Send, Users, Video, Youtube, Search, X, TrendingUp, Clock, Filter, PlayCircle } from 'lucide-react';
 import YouTube, { YouTubeProps } from 'react-youtube';
+import axios from 'axios';
+import InfiniteScroll from 'react-infinite-scroll-component';
+import { formatDistanceToNow } from 'date-fns';
 
 interface VideoEvent {
   type: 'play' | 'pause' | 'seek' | 'load-video';
@@ -26,7 +29,19 @@ interface EmojiReaction {
   y: number;
 }
 
-const EMOJI_OPTIONS = ['❤️', '😍', '😘', '🥰', '💕', '💖', '💗', '💓', '💞', '😊', '😂', '🎉', '🔥', '👏', '🎬'];
+interface YouTubeVideo {
+  id: string;
+  title: string;
+  thumbnail: string;
+  channelTitle: string;
+  description: string;
+  publishedAt: string;
+  viewCount?: string;
+  duration?: string;
+}
+
+const DEFAULT_EMOJIS = ['❤️', '😂', '🎉', '🔥', '👏'];
+const AVAILABLE_EMOJIS = ['❤️', '😍', '😘', '🥰', '💕', '💖', '💗', '💓', '💞', '😊', '😂', '🤣', '😎', '🥳', '🎉', '🔥', '👏', '🙌', '💪', '✨', '⭐', '🌟', '💯', '🎬', '🎵', '🎶', '🍿', '🎮', '👍', '👎', '🙏', '💔', '💝', '💖', '🌹'];
 
 export default function VideoPlayer() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -43,6 +58,16 @@ export default function VideoPlayer() {
   const [showWelcome, setShowWelcome] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [emojiReactions, setEmojiReactions] = useState<EmojiReaction[]>([]);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchResults, setSearchResults] = useState<YouTubeVideo[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [nextPageToken, setNextPageToken] = useState<string>('');
+  const [hasMore, setHasMore] = useState(true);
+  const [searchFilter, setSearchFilter] = useState<'relevance' | 'date' | 'viewCount' | 'rating'>('relevance');
+  const [videoDuration, setVideoDuration] = useState<'any' | 'short' | 'medium' | 'long'>('any');
+  const [userEmojis, setUserEmojis] = useState<string[]>(DEFAULT_EMOJIS);
+  const [showEmojiEditor, setShowEmojiEditor] = useState(false);
   const isReceivingUpdate = useRef(false);
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const senderIdRef = useRef(Math.random().toString(36));
@@ -50,6 +75,18 @@ export default function VideoPlayer() {
 
   useEffect(() => {
     setMounted(true);
+    // Load custom emojis from localStorage
+    const savedEmojis = localStorage.getItem('watch2together-emojis');
+    if (savedEmojis) {
+      try {
+        const parsed = JSON.parse(savedEmojis);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setUserEmojis(parsed);
+        }
+      } catch (e) {
+        console.error('Failed to load emojis:', e);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -211,19 +248,78 @@ export default function VideoPlayer() {
       // Extract video ID from various YouTube URL formats
       const videoId = extractYouTubeId(youtubeUrl);
       if (videoId) {
-        setVideoSrc(videoId);
-        setVideoType('youtube');
-        
-        // Broadcast to other users to load the same YouTube video
-        triggerEvent('video-event', {
-          type: 'load-video',
-          time: 0,
-          senderId: senderIdRef.current,
-          videoSrc: videoId,
-          videoType: 'youtube',
-        });
+        loadYouTubeVideo(videoId);
       }
     }
+  };
+
+  const loadYouTubeVideo = (videoId: string) => {
+    setVideoSrc(videoId);
+    setVideoType('youtube');
+    setShowSearch(false);
+    
+    // Broadcast to other users to load the same YouTube video
+    triggerEvent('video-event', {
+      type: 'load-video',
+      time: 0,
+      senderId: senderIdRef.current,
+      videoSrc: videoId,
+      videoType: 'youtube',
+    });
+  };
+
+  const searchYouTube = useCallback(async (query: string, pageToken = '') => {
+    if (!query.trim()) return;
+    
+    setIsSearching(true);
+    try {
+      const response = await axios.get('/api/youtube/search', {
+        params: {
+          q: query,
+          pageToken,
+          order: searchFilter,
+          videoDuration,
+        },
+      });
+
+      const { items, nextPageToken: newPageToken } = response.data;
+      
+      if (pageToken) {
+        // Append for infinite scroll
+        setSearchResults((prev) => [...prev, ...items]);
+      } else {
+        // New search
+        setSearchResults(items);
+      }
+      
+      setNextPageToken(newPageToken || '');
+      setHasMore(!!newPageToken);
+    } catch (error) {
+      console.error('YouTube search error:', error);
+      setSearchResults([]);
+      setHasMore(false);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [searchFilter, videoDuration]);
+
+  const handleSearch = () => {
+    setNextPageToken('');
+    setHasMore(true);
+    searchYouTube(searchQuery);
+  };
+
+  const loadMoreResults = () => {
+    if (nextPageToken && !isSearching) {
+      searchYouTube(searchQuery, nextPageToken);
+    }
+  };
+
+  const formatViewCount = (count: string) => {
+    const num = parseInt(count);
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M views`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}K views`;
+    return `${num} views`;
   };
 
   // YouTube player event handlers
@@ -358,6 +454,33 @@ export default function VideoPlayer() {
     }, 3000);
   };
 
+  const addEmoji = (emoji: string) => {
+    if (userEmojis.length >= 10) {
+      alert('Maximum 10 emojis allowed');
+      return;
+    }
+    if (!userEmojis.includes(emoji)) {
+      const newEmojis = [...userEmojis, emoji];
+      setUserEmojis(newEmojis);
+      localStorage.setItem('watch2together-emojis', JSON.stringify(newEmojis));
+    }
+  };
+
+  const removeEmoji = (emoji: string) => {
+    const newEmojis = userEmojis.filter(e => e !== emoji);
+    if (newEmojis.length === 0) {
+      alert('You must have at least one emoji');
+      return;
+    }
+    setUserEmojis(newEmojis);
+    localStorage.setItem('watch2together-emojis', JSON.stringify(newEmojis));
+  };
+
+  const resetEmojis = () => {
+    setUserEmojis(DEFAULT_EMOJIS);
+    localStorage.setItem('watch2together-emojis', JSON.stringify(DEFAULT_EMOJIS));
+  };
+
   const startWatching = () => {
     if (username.trim()) {
       setShowWelcome(false);
@@ -461,20 +584,8 @@ export default function VideoPlayer() {
         )}
       </AnimatePresence>
 
-      <div className="relative z-10 container mx-auto px-4 py-6 md:py-8">
-        {/* Header */}
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="flex items-center justify-between mb-6 md:mb-8"
-        >
-          <div className="flex items-center gap-2 text-purple-600">
-            <Users className="w-4 h-4" />
-            <p className="text-sm font-medium">Room: {room}</p>
-          </div>
-        </motion.div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
+      <div className="relative z-10 container mx-auto px-2 sm:px-4 py-2 sm:py-3 lg:py-4 max-h-screen">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 sm:gap-3 lg:gap-4">
           {/* Video Section */}
           <motion.div
             initial={{ x: -20, opacity: 0 }}
@@ -482,14 +593,48 @@ export default function VideoPlayer() {
             transition={{ delay: 0.1 }}
             className="lg:col-span-2"
           >
-            <div className="bg-white/80 backdrop-blur-xl rounded-2xl md:rounded-3xl shadow-xl p-4 md:p-6 border border-rose-100">
-              <div className="flex items-center gap-2 mb-4">
-                <Video className="w-5 h-5 text-rose-500" />
-                <h2 className="text-lg md:text-xl font-semibold text-gray-800">Video Player</h2>
+            <div className="bg-white/80 backdrop-blur-xl rounded-xl md:rounded-2xl shadow-xl p-2 sm:p-3 md:p-4 border border-rose-100">
+              <div className="flex items-center justify-between mb-2 sm:mb-3">
+                <div className="flex items-center gap-2">
+                  <Video className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500" />
+                  <h2 className="text-base sm:text-lg md:text-xl font-semibold text-gray-800">Video Player</h2>
+                </div>
+                
+                {/* Change Video Button - Same row as heading */}
+                {videoSrc && (
+                  <div className="flex gap-2">
+                    <label className="cursor-pointer">
+                      <motion.div
+                        whileHover={{ scale: 1.05, boxShadow: '0 10px 25px rgba(236, 72, 153, 0.3)' }}
+                        whileTap={{ scale: 0.95 }}
+                        className="bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 px-4 py-2.5 rounded-full font-semibold text-sm shadow-lg flex items-center gap-2 text-white transition-all"
+                      >
+                        <Upload className="w-4 h-4" />
+                        <span className="hidden sm:inline">Local</span>
+                      </motion.div>
+                      <input
+                        type="file"
+                        accept="video/*"
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                    </label>
+                    <motion.button
+                      whileHover={{ scale: 1.05, boxShadow: '0 10px 25px rgba(236, 72, 153, 0.3)' }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setShowSearch(true)}
+                      className="bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 px-4 py-2.5 rounded-full font-semibold text-sm shadow-lg flex items-center gap-2 text-white transition-all"
+                    >
+                      <Youtube className="w-4 h-4" />
+                      <span className="hidden sm:inline">YouTube</span>
+                    </motion.button>
+                  </div>
+                )}
               </div>
 
               {!videoSrc ? (
                 <div id="video-container" className="aspect-video bg-gradient-to-br from-rose-100 to-purple-100 rounded-xl md:rounded-2xl flex flex-col items-center justify-center border-2 border-dashed border-rose-300 p-4 relative">
+                  {/* Only show video type switcher when no video is loaded */}
                   <div className="flex gap-2 mb-6">
                     <motion.button
                       whileHover={{ scale: 1.05 }}
@@ -545,6 +690,25 @@ export default function VideoPlayer() {
                     <>
                       <Youtube className="w-12 h-12 md:w-16 md:h-16 text-rose-400 mb-4" />
                       <div className="w-full max-w-md px-4">
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => setShowSearch(true)}
+                          className="w-full bg-gradient-to-r from-rose-500 to-purple-600 text-white px-6 md:px-8 py-4 rounded-full font-semibold shadow-lg hover:shadow-xl transition-shadow text-base md:text-lg mb-4 flex items-center justify-center gap-2"
+                        >
+                          <Search className="w-5 h-5" />
+                          Explore & Search YouTube
+                        </motion.button>
+                        
+                        <div className="relative mb-3">
+                          <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-gray-300"></div>
+                          </div>
+                          <div className="relative flex justify-center text-sm">
+                            <span className="px-2 bg-gradient-to-br from-rose-100 to-purple-100 text-gray-500">or paste URL</span>
+                          </div>
+                        </div>
+                        
                         <input
                           type="text"
                           value={youtubeUrl}
@@ -557,90 +721,71 @@ export default function VideoPlayer() {
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
                           onClick={handleYoutubeSubmit}
-                          className="w-full bg-gradient-to-r from-rose-500 to-purple-600 text-white px-6 md:px-8 py-3 rounded-full font-semibold shadow-lg hover:shadow-xl transition-shadow text-sm md:text-base"
+                          className="w-full bg-white text-gray-700 border-2 border-gray-200 px-6 md:px-8 py-3 rounded-full font-semibold hover:border-rose-300 hover:bg-rose-50 transition-all text-sm md:text-base"
                         >
-                          Load YouTube Video
+                          Load from URL
                         </motion.button>
                         <p className="text-xs md:text-sm text-gray-500 mt-3 text-center">
-                          Both viewers need to enter the same YouTube URL
+                          Search, explore, or paste a direct link
                         </p>
                       </div>
                     </>
                   )}
                 </div>
               ) : (
-                <div id="video-container" className="relative group">
-                  {videoType === 'file' ? (
-                    <video
-                      ref={videoRef}
-                      src={videoSrc}
-                      controls
-                      onPlay={handlePlay}
-                      onPause={handlePause}
-                      onSeeked={handleSeeked}
-                      onSeeking={(e) => {
-                        // Prevent pause during seeking if video should be playing
-                        const video = e.currentTarget;
-                        if (shouldBePlaying.current && video.paused) {
-                          video.play().catch(() => {});
-                        }
-                      }}
-                      className="w-full rounded-xl md:rounded-2xl shadow-lg"
-                    />
-                  ) : (
-                    <div className="aspect-video w-full rounded-xl md:rounded-2xl shadow-lg overflow-hidden bg-black">
-                      <YouTube
-                        videoId={videoSrc}
-                        opts={youtubeOpts}
-                        onReady={onYouTubeReady}
-                        onStateChange={onYouTubeStateChange}
-                        className="w-full h-full"
-                        iframeClassName="w-full h-full rounded-xl md:rounded-2xl"
-                      />
-                    </div>
-                  )}
-                  
-                  {/* Emoji Reactions Overlay */}
-                  <AnimatePresence>
-                    {emojiReactions.map((reaction) => (
-                      <motion.div
-                        key={reaction.id}
-                        initial={{ opacity: 1, scale: 0, x: reaction.x, y: reaction.y }}
-                        animate={{ 
-                          opacity: 0, 
-                          scale: 2, 
-                          y: reaction.y - 100,
-                          rotate: Math.random() * 40 - 20
+                <div id="video-container" className="relative">
+                    {videoType === 'file' ? (
+                      <video
+                        ref={videoRef}
+                        src={videoSrc}
+                        controls
+                        onPlay={handlePlay}
+                        onPause={handlePause}
+                        onSeeked={handleSeeked}
+                        onSeeking={(e) => {
+                          // Prevent pause during seeking if video should be playing
+                          const video = e.currentTarget;
+                          if (shouldBePlaying.current && video.paused) {
+                            video.play().catch(() => {});
+                          }
                         }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 3, ease: 'easeOut' }}
-                        className="absolute text-4xl pointer-events-none"
-                        style={{ left: 0, top: 0 }}
-                      >
-                        {reaction.emoji}
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                  
-                  {videoType === 'file' && (
-                    <label className="absolute top-2 right-2 md:top-4 md:right-4 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity">
-                      <motion.div
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="bg-white/90 backdrop-blur-sm px-3 md:px-4 py-2 rounded-full font-medium text-xs md:text-sm shadow-lg flex items-center gap-2"
-                      >
-                        <Upload className="w-3 h-3 md:w-4 md:h-4" />
-                        <span className="hidden sm:inline">Change Video</span>
-                      </motion.div>
-                      <input
-                        type="file"
-                        accept="video/*"
-                        onChange={handleFileChange}
-                        className="hidden"
+                        className="w-full rounded-xl md:rounded-2xl shadow-lg"
                       />
-                    </label>
-                  )}
-                </div>
+                    ) : (
+                      <div className="aspect-video w-full rounded-xl md:rounded-2xl shadow-lg overflow-hidden bg-black">
+                        <YouTube
+                          videoId={videoSrc}
+                          opts={youtubeOpts}
+                          onReady={onYouTubeReady}
+                          onStateChange={onYouTubeStateChange}
+                          className="w-full h-full"
+                          iframeClassName="w-full h-full rounded-xl md:rounded-2xl"
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Emoji Reactions Overlay */}
+                    <AnimatePresence>
+                      {emojiReactions.map((reaction) => (
+                        <motion.div
+                          key={reaction.id}
+                          initial={{ opacity: 1, scale: 0, x: reaction.x, y: reaction.y }}
+                          animate={{ 
+                            opacity: 0, 
+                            scale: 2, 
+                            y: reaction.y - 100,
+                            rotate: Math.random() * 40 - 20
+                          }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 3, ease: 'easeOut' }}
+                          className="absolute text-4xl pointer-events-none"
+                          style={{ left: 0, top: 0 }}
+                        >
+                          {reaction.emoji}
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
               )}
 
               {/* Emoji Reaction Bar */}
@@ -648,21 +793,68 @@ export default function VideoPlayer() {
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="mt-4 bg-gradient-to-r from-rose-50 via-pink-50 to-purple-50 rounded-2xl p-3 border border-rose-100"
+                  className="mt-2 sm:mt-3 bg-gradient-to-r from-rose-50 via-pink-50 to-purple-50 rounded-xl sm:rounded-2xl p-2 sm:p-3 border border-rose-100"
                 >
-                  <div className="flex items-center justify-center gap-2 md:gap-3 flex-wrap">
-                    {EMOJI_OPTIONS.map((emoji) => (
-                      <motion.button
-                        key={emoji}
-                        whileHover={{ scale: 1.2, rotate: [0, -10, 10, 0] }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => sendEmoji(emoji)}
-                        className="text-3xl md:text-4xl p-2 hover:bg-white/80 rounded-xl transition-all transform hover:shadow-lg"
-                      >
-                        {emoji}
-                      </motion.button>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-gray-600 font-medium">Quick Reactions</span>
+                    <button
+                      onClick={() => setShowEmojiEditor(!showEmojiEditor)}
+                      className="text-xs text-rose-600 hover:text-rose-700 font-medium"
+                    >
+                      {showEmojiEditor ? 'Done' : 'Customize'}
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-center gap-1.5 sm:gap-2 md:gap-3 flex-wrap">
+                    {userEmojis.map((emoji, idx) => (
+                      <div key={idx} className="relative group">
+                        <motion.button
+                          whileHover={{ scale: 1.2, rotate: [0, -10, 10, 0] }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={() => sendEmoji(emoji)}
+                          className="text-2xl sm:text-3xl md:text-4xl p-1 sm:p-2 hover:bg-white/80 rounded-xl transition-all transform hover:shadow-lg"
+                        >
+                          {emoji}
+                        </motion.button>
+                        {showEmojiEditor && (
+                          <button
+                            onClick={() => removeEmoji(emoji)}
+                            className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
                     ))}
                   </div>
+                  
+                  {/* Emoji Editor */}
+                  {showEmojiEditor && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="mt-3 pt-3 border-t border-rose-200"
+                    >
+                      <p className="text-xs text-gray-600 mb-2">Add more emojis ({userEmojis.length}/10):</p>
+                      <div className="flex items-center gap-1 flex-wrap max-h-32 overflow-y-auto">
+                        {AVAILABLE_EMOJIS.filter(e => !userEmojis.includes(e)).map((emoji, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => addEmoji(emoji)}
+                            className="text-2xl p-1 hover:bg-white/80 rounded-lg transition-all"
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={resetEmojis}
+                        className="mt-2 text-xs text-gray-500 hover:text-gray-700 underline"
+                      >
+                        Reset to defaults
+                      </button>
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
             </div>
@@ -675,19 +867,19 @@ export default function VideoPlayer() {
             transition={{ delay: 0.2 }}
             className="lg:col-span-1"
           >
-            <div className="bg-white/80 backdrop-blur-xl rounded-2xl md:rounded-3xl shadow-xl p-4 md:p-6 border border-rose-100 h-[400px] md:h-[500px] lg:h-[600px] flex flex-col">
-              <div className="flex items-center gap-2 mb-4">
+            <div className="bg-white/80 backdrop-blur-xl rounded-xl md:rounded-2xl shadow-xl p-2 sm:p-3 md:p-4 border border-rose-100 h-[280px] sm:h-[320px] md:h-[380px] lg:h-[500px] flex flex-col">
+              <div className="flex items-center gap-2 mb-2 sm:mb-3">
                 <motion.div
                   animate={{ rotate: [0, 10, -10, 0] }}
                   transition={{ duration: 2, repeat: Infinity }}
                 >
-                  <Heart className="w-5 h-5 text-rose-500" fill="currentColor" />
+                  <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500" fill="currentColor" />
                 </motion.div>
-                <h2 className="text-lg md:text-xl font-semibold text-gray-800">Chat</h2>
+                <h2 className="text-base sm:text-lg md:text-xl font-semibold text-gray-800">Chat</h2>
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto mb-4 space-y-2 pr-2">
+              <div className="flex-1 overflow-y-auto mb-2 sm:mb-3 space-y-1.5 sm:space-y-2 pr-1 sm:pr-2">
                 <AnimatePresence>
                   {messages.map((msg, idx) => {
                     const [sender, ...textParts] = msg.split(': ');
@@ -744,6 +936,191 @@ export default function VideoPlayer() {
           </motion.div>
         </div>
       </div>
+
+      {/* YouTube Search Results Modal */}
+      <AnimatePresence>
+        {showSearch && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={() => setShowSearch(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-3xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="p-4 md:p-6 border-b border-gray-200">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-rose-600 to-purple-600 bg-clip-text text-transparent flex items-center gap-2">
+                      <Youtube className="w-6 h-6 text-rose-500" />
+                      Explore YouTube
+                    </h3>
+                    {videoSrc && videoType === 'youtube' && (
+                      <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
+                        <PlayCircle className="w-3 h-3" />
+                        Currently playing • Select a new video to change
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setShowSearch(false)}
+                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                  >
+                    <X className="w-6 h-6 text-gray-600" />
+                  </button>
+                </div>
+
+                {/* Search Bar */}
+                <div className="flex gap-2 mb-4">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                      placeholder="Search for videos..."
+                      className="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-gray-200 focus:border-rose-500 focus:ring-4 focus:ring-rose-100 outline-none transition-all"
+                    />
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleSearch}
+                    disabled={isSearching || !searchQuery.trim()}
+                    className="bg-gradient-to-r from-rose-500 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-shadow disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isSearching ? (
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Search className="w-5 h-5" />
+                    )}
+                    <span className="hidden sm:inline">Search</span>
+                  </motion.button>
+                </div>
+
+                {/* Filters */}
+                <div className="flex gap-2 flex-wrap">
+                  <select
+                    value={searchFilter}
+                    onChange={(e) => setSearchFilter(e.target.value as any)}
+                    className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-rose-500 focus:ring-2 focus:ring-rose-100 outline-none"
+                  >
+                    <option value="relevance">Most Relevant</option>
+                    <option value="date">Latest</option>
+                    <option value="viewCount">Most Viewed</option>
+                    <option value="rating">Top Rated</option>
+                  </select>
+
+                  <select
+                    value={videoDuration}
+                    onChange={(e) => setVideoDuration(e.target.value as any)}
+                    className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-rose-500 focus:ring-2 focus:ring-rose-100 outline-none"
+                  >
+                    <option value="any">Any Duration</option>
+                    <option value="short">Under 4 minutes</option>
+                    <option value="medium">4-20 minutes</option>
+                    <option value="long">Over 20 minutes</option>
+                  </select>
+                </div>
+              </div>
+              
+              {/* Results */}
+              <div
+                id="scrollableDiv"
+                className="overflow-y-auto flex-1 p-4 md:p-6"
+              >
+                {searchResults.length === 0 && !isSearching ? (
+                  <div className="text-center py-12">
+                    <Youtube className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+                    <p className="text-gray-500">Search for videos to get started!</p>
+                    <div className="mt-6 flex flex-wrap justify-center gap-2">
+                      {['Music', 'Gaming', 'Movies', 'Comedy', 'Podcast'].map((tag) => (
+                        <button
+                          key={tag}
+                          onClick={() => {
+                            setSearchQuery(tag);
+                            setTimeout(() => handleSearch(), 100);
+                          }}
+                          className="px-4 py-2 bg-gradient-to-r from-rose-50 to-purple-50 text-gray-700 rounded-full text-sm hover:from-rose-100 hover:to-purple-100 transition-all"
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <InfiniteScroll
+                    dataLength={searchResults.length}
+                    next={loadMoreResults}
+                    hasMore={hasMore}
+                    loader={
+                      <div className="text-center py-4">
+                        <div className="inline-block w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    }
+                    endMessage={
+                      <p className="text-center text-gray-500 py-4 text-sm">
+                        No more results
+                      </p>
+                    }
+                    scrollableTarget="scrollableDiv"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {searchResults.map((video) => (
+                        <motion.div
+                          key={video.id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => loadYouTubeVideo(video.id)}
+                          className="cursor-pointer bg-white rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all border border-gray-100"
+                        >
+                          <div className="relative aspect-video bg-gray-200">
+                            <img
+                              src={video.thumbnail}
+                              alt={video.title}
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <PlayCircle className="w-12 h-12 text-white drop-shadow-lg" fill="white" />
+                            </div>
+                          </div>
+                          <div className="p-3">
+                            <h4 className="font-semibold text-sm text-gray-800 line-clamp-2 mb-2 leading-tight">
+                              {video.title}
+                            </h4>
+                            <p className="text-xs text-gray-600 mb-1">{video.channelTitle}</p>
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                              {video.viewCount && (
+                                <span>{formatViewCount(video.viewCount)}</span>
+                              )}
+                              {video.publishedAt && (
+                                <>
+                                  <span>•</span>
+                                  <span>{formatDistanceToNow(new Date(video.publishedAt), { addSuffix: true })}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </InfiniteScroll>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
