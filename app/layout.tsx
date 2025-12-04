@@ -1,3 +1,5 @@
+import './globals.css'
+
 export const metadata = {
   title: 'Watch2Together',
   description: 'Synced video player with chat',
