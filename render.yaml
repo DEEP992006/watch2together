@@ -7,3 +7,11 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PUSHER_APP_ID
+        value: "2086563"
+      - key: NEXT_PUBLIC_PUSHER_KEY
+        value: "25786def95c5c13eda17"
+      - key: PUSHER_SECRET
+        value: "7417fc178505e951b901"
+      - key: NEXT_PUBLIC_PUSHER_CLUSTER
+        value: "ap2"

@@ -1,18 +1,21 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Pusher from 'pusher-js';
 
-interface WSMessage {
-  room: string;
-  type: 'play' | 'pause' | 'seek' | 'chat';
-  time?: number;
-  text?: string;
-  user?: string;
+interface VideoEvent {
+  type: 'play' | 'pause' | 'seek';
+  time: number;
+}
+
+interface ChatMessage {
+  user: string;
+  text: string;
 }
 
 export default function VideoPlayer() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const pusherRef = useRef<Pusher | null>(null);
   const [room, setRoom] = useState<string>('');
   const [videoSrc, setVideoSrc] = useState<string>('');
   const [messages, setMessages] = useState<string[]>([]);
@@ -25,43 +28,57 @@ export default function VideoPlayer() {
     const roomParam = params.get('room') || 'default';
     setRoom(roomParam);
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY || '25786def95c5c13eda17', {
+      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'ap2',
+    });
 
-    ws.onopen = () => {
-      console.log('Connected to WebSocket');
-    };
+    pusherRef.current = pusher;
 
-    ws.onmessage = (event) => {
-      const message: WSMessage = JSON.parse(event.data);
+    const channel = pusher.subscribe(`room-${roomParam}`);
+
+    channel.bind('video-event', (data: VideoEvent) => {
       const video = videoRef.current;
       if (!video) return;
 
       isReceivingUpdate.current = true;
 
-      if (message.type === 'play' && message.time !== undefined) {
-        video.currentTime = message.time;
+      if (data.type === 'play') {
+        video.currentTime = data.time;
         video.play();
-      } else if (message.type === 'pause' && message.time !== undefined) {
-        video.currentTime = message.time;
+      } else if (data.type === 'pause') {
+        video.currentTime = data.time;
         video.pause();
-      } else if (message.type === 'seek' && message.time !== undefined) {
-        video.currentTime = message.time;
-      } else if (message.type === 'chat' && message.text && message.user) {
-        setMessages((prev) => [...prev, `${message.user}: ${message.text}`]);
+      } else if (data.type === 'seek') {
+        video.currentTime = data.time;
       }
 
       setTimeout(() => {
         isReceivingUpdate.current = false;
       }, 100);
-    };
+    });
+
+    channel.bind('chat-message', (data: ChatMessage) => {
+      setMessages((prev) => [...prev, `${data.user}: ${data.text}`]);
+    });
 
     return () => {
-      ws.close();
+      channel.unbind_all();
+      channel.unsubscribe();
+      pusher.disconnect();
     };
   }, []);
+
+  const triggerEvent = async (event: string, data: any) => {
+    await fetch('/api/pusher/trigger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        channel: `room-${room}`,
+        event,
+        data,
+      }),
+    });
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -72,44 +89,35 @@ export default function VideoPlayer() {
   };
 
   const handlePlay = () => {
-    if (isReceivingUpdate.current || !wsRef.current || !videoRef.current) return;
-    const message: WSMessage = {
-      room,
+    if (isReceivingUpdate.current || !videoRef.current) return;
+    triggerEvent('video-event', {
       type: 'play',
       time: videoRef.current.currentTime,
-    };
-    wsRef.current.send(JSON.stringify(message));
+    });
   };
 
   const handlePause = () => {
-    if (isReceivingUpdate.current || !wsRef.current || !videoRef.current) return;
-    const message: WSMessage = {
-      room,
+    if (isReceivingUpdate.current || !videoRef.current) return;
+    triggerEvent('video-event', {
       type: 'pause',
       time: videoRef.current.currentTime,
-    };
-    wsRef.current.send(JSON.stringify(message));
+    });
   };
 
   const handleSeeked = () => {
-    if (isReceivingUpdate.current || !wsRef.current || !videoRef.current) return;
-    const message: WSMessage = {
-      room,
+    if (isReceivingUpdate.current || !videoRef.current) return;
+    triggerEvent('video-event', {
       type: 'seek',
       time: videoRef.current.currentTime,
-    };
-    wsRef.current.send(JSON.stringify(message));
+    });
   };
 
   const sendChat = () => {
-    if (!chatInput.trim() || !username.trim() || !wsRef.current) return;
-    const message: WSMessage = {
-      room,
-      type: 'chat',
-      text: chatInput,
+    if (!chatInput.trim() || !username.trim()) return;
+    triggerEvent('chat-message', {
       user: username,
-    };
-    wsRef.current.send(JSON.stringify(message));
+      text: chatInput,
+    });
     setMessages((prev) => [...prev, `${username}: ${chatInput}`]);
     setChatInput('');
   };

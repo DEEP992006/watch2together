@@ -5,15 +5,17 @@
   "scripts": {
     "dev:server": "tsx watch server/index.ts",
     "dev:next": "next dev",
-    "dev": "concurrently \"pnpm run dev:server\" \"pnpm run dev:next\"",
+    "dev": "tsx watch server/pusher.ts",
     "build": "next build",
     "start:server": "tsx server/index.ts",
     "start:next": "next start",
-    "start": "NODE_ENV=production tsx server/production.ts"
+    "start": "NODE_ENV=production tsx server/pusher.ts"
   },
   "dependencies": {
     "express": "^4.18.2",
     "next": "^14.2.0",
+    "pusher": "^5.2.0",
+    "pusher-js": "^8.4.0-rc2",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "ws": "^8.16.0"
