@@ -1,4 +1,4 @@
-# Watch2Together
+# TaraDeepVibes
 
 Minimal synced video player with chat using Next.js 14 and WebSocket.
 

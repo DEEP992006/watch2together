@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Pusher from 'pusher-js';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Upload, Send, Users, Video, Youtube, Search, X, TrendingUp, Clock, Filter, PlayCircle } from 'lucide-react';
+import { Heart, Upload, Send, Users, Video, Youtube, Search, X, TrendingUp, Clock, Filter, PlayCircle, Smile } from 'lucide-react';
 import YouTube, { YouTubeProps } from 'react-youtube';
 import axios from 'axios';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import { formatDistanceToNow } from 'date-fns';
+import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 
 interface VideoEvent {
   type: 'play' | 'pause' | 'seek' | 'load-video';
@@ -20,6 +21,7 @@ interface VideoEvent {
 interface ChatMessage {
   user: string;
   text: string;
+  senderId?: string;
 }
 
 interface EmojiReaction {
@@ -68,6 +70,7 @@ export default function VideoPlayer() {
   const [videoDuration, setVideoDuration] = useState<'any' | 'short' | 'medium' | 'long'>('any');
   const [userEmojis, setUserEmojis] = useState<string[]>(DEFAULT_EMOJIS);
   const [showEmojiEditor, setShowEmojiEditor] = useState(false);
+  const [showChatEmojiPicker, setShowChatEmojiPicker] = useState(false);
   const isReceivingUpdate = useRef(false);
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const senderIdRef = useRef(Math.random().toString(36));
@@ -76,7 +79,7 @@ export default function VideoPlayer() {
   useEffect(() => {
     setMounted(true);
     // Load custom emojis from localStorage
-    const savedEmojis = localStorage.getItem('watch2together-emojis');
+    const savedEmojis = localStorage.getItem('taradeepvibes-emojis');
     if (savedEmojis) {
       try {
         const parsed = JSON.parse(savedEmojis);
@@ -195,6 +198,8 @@ export default function VideoPlayer() {
     });
 
     channel.bind('chat-message', (data: ChatMessage) => {
+      // Ignore messages sent by this client to avoid duplicates
+      if (data.senderId === senderIdRef.current) return;
       setMessages((prev) => [...prev, `${data.user}: ${data.text}`]);
     });
 
@@ -432,9 +437,15 @@ export default function VideoPlayer() {
     triggerEvent('chat-message', {
       user: username,
       text: chatInput,
+      senderId: senderIdRef.current,
     });
     setMessages((prev) => [...prev, `${username}: ${chatInput}`]);
     setChatInput('');
+    setShowChatEmojiPicker(false);
+  };
+
+  const onEmojiClick = (emojiData: EmojiClickData) => {
+    setChatInput((prev) => prev + emojiData.emoji);
   };
 
   const sendEmoji = (emoji: string) => {
@@ -462,7 +473,7 @@ export default function VideoPlayer() {
     if (!userEmojis.includes(emoji)) {
       const newEmojis = [...userEmojis, emoji];
       setUserEmojis(newEmojis);
-      localStorage.setItem('watch2together-emojis', JSON.stringify(newEmojis));
+      localStorage.setItem('taradeepvibes-emojis', JSON.stringify(newEmojis));
     }
   };
 
@@ -473,12 +484,12 @@ export default function VideoPlayer() {
       return;
     }
     setUserEmojis(newEmojis);
-    localStorage.setItem('watch2together-emojis', JSON.stringify(newEmojis));
+    localStorage.setItem('taradeepvibes-emojis', JSON.stringify(newEmojis));
   };
 
   const resetEmojis = () => {
     setUserEmojis(DEFAULT_EMOJIS);
-    localStorage.setItem('watch2together-emojis', JSON.stringify(DEFAULT_EMOJIS));
+    localStorage.setItem('taradeepvibes-emojis', JSON.stringify(DEFAULT_EMOJIS));
   };
 
   const startWatching = () => {
@@ -537,7 +548,7 @@ export default function VideoPlayer() {
               </motion.div>
               
               <h1 className="text-3xl md:text-4xl font-bold text-center bg-gradient-to-r from-rose-600 to-purple-600 bg-clip-text text-transparent mb-2">
-                Watch2Together
+                TaraDeepVibes
               </h1>
               
               <p className="text-gray-600 text-center mb-8 text-sm md:text-base">
@@ -914,23 +925,51 @@ export default function VideoPlayer() {
               </div>
 
               {/* Input */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendChat()}
-                  placeholder="Type a message..."
-                  className="flex-1 px-3 md:px-4 py-2.5 md:py-3 rounded-xl border-2 border-rose-200 focus:border-rose-500 focus:ring-4 focus:ring-rose-200 outline-none transition-all text-sm md:text-base"
-                />
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={sendChat}
-                  className="bg-gradient-to-r from-rose-500 to-purple-600 text-white p-2.5 md:p-3 rounded-xl shadow-lg hover:shadow-xl transition-shadow"
-                >
-                  <Send className="w-4 h-4 md:w-5 md:h-5" />
-                </motion.button>
+              <div className="relative">
+                {/* Emoji Picker */}
+                {showChatEmojiPicker && (
+                  <div className="absolute bottom-full mb-2 right-0 z-10 shadow-2xl rounded-2xl overflow-hidden">
+                    <EmojiPicker
+                      onEmojiClick={onEmojiClick}
+                      width={280}
+                      height={350}
+                      previewConfig={{ showPreview: false }}
+                      searchPlaceHolder="Search emoji..."
+                    />
+                  </div>
+                )}
+                
+                <div className="flex gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setShowChatEmojiPicker(!showChatEmojiPicker)}
+                    className={`p-2.5 md:p-3 rounded-xl shadow-lg transition-all ${
+                      showChatEmojiPicker
+                        ? 'bg-gradient-to-r from-rose-500 to-purple-600 text-white'
+                        : 'bg-white text-gray-600 border-2 border-rose-200 hover:border-rose-300'
+                    }`}
+                  >
+                    <Smile className="w-4 h-4 md:w-5 md:h-5" />
+                  </motion.button>
+                  
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && sendChat()}
+                    placeholder="Type a message..."
+                    className="flex-1 px-3 md:px-4 py-2.5 md:py-3 rounded-xl border-2 border-rose-200 focus:border-rose-500 focus:ring-4 focus:ring-rose-200 outline-none transition-all text-sm md:text-base"
+                  />
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={sendChat}
+                    className="bg-gradient-to-r from-rose-500 to-purple-600 text-white p-2.5 md:p-3 rounded-xl shadow-lg hover:shadow-xl transition-shadow"
+                  >
+                    <Send className="w-4 h-4 md:w-5 md:h-5" />
+                  </motion.button>
+                </div>
               </div>
             </div>
           </motion.div>
