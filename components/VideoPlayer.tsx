@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 interface WSMessage {
+  room: string;
   type: 'play' | 'pause' | 'seek' | 'chat';
   time?: number;
   text?: string;

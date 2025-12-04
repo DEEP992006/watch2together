@@ -7,7 +7,9 @@
     "dev:next": "next dev",
     "dev": "concurrently \"pnpm run dev:server\" \"pnpm run dev:next\"",
     "build": "next build",
-    "start": "next start"
+    "start:server": "tsx server/index.ts",
+    "start:next": "next start",
+    "start": "concurrently \"pnpm run start:server\" \"pnpm run start:next\""
   },
   "dependencies": {
     "express": "^4.18.2",
