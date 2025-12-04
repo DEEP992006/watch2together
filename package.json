@@ -9,7 +9,7 @@
     "build": "next build",
     "start:server": "tsx server/index.ts",
     "start:next": "next start",
-    "start": "concurrently \"pnpm run start:server\" \"pnpm run start:next\""
+    "start": "NODE_ENV=production tsx server/production.ts"
   },
   "dependencies": {
     "express": "^4.18.2",

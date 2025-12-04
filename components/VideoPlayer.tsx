@@ -25,7 +25,9 @@ export default function VideoPlayer() {
     const roomParam = params.get('room') || 'default';
     setRoom(roomParam);
 
-    const ws = new WebSocket('ws://localhost:8000');
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
