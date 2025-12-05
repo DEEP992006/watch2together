@@ -157,10 +157,6 @@ export default function TruthOrDareGame({ room, username, onSendMessage }: Truth
 
     setGameState(newState);
     triggerGameEvent('game-state-update', newState);
-
-    if (onSendMessage) {
-      onSendMessage(`🎮 Game started! ${player1.name} goes first!`);
-    }
   };
 
   // Player chooses Truth or Dare
@@ -173,11 +169,6 @@ export default function TruthOrDareGame({ room, username, onSendMessage }: Truth
 
     setGameState(newState);
     triggerGameEvent('game-state-update', newState);
-
-    const currentPlayer = gameState.players.find(p => p.id === gameState.currentTurnPlayerId);
-    if (onSendMessage) {
-      onSendMessage(`${currentPlayer?.name} chose ${choice.toUpperCase()}!`);
-    }
   };
 
   // Other player submits a question/task
@@ -193,11 +184,6 @@ export default function TruthOrDareGame({ room, username, onSendMessage }: Truth
     setGameState(newState);
     triggerGameEvent('game-state-update', newState);
     
-    const otherPlayer = gameState.players.find(p => p.id === gameState.otherPlayerId);
-    if (onSendMessage) {
-      onSendMessage(`${otherPlayer?.name} asked: ${questionInput}`);
-    }
-
     setQuestionInput('');
   };
 
@@ -219,11 +205,6 @@ export default function TruthOrDareGame({ room, username, onSendMessage }: Truth
     setGameState(newState);
     triggerGameEvent('game-state-update', newState);
 
-    const currentPlayer = gameState.players.find(p => p.id === gameState.currentTurnPlayerId);
-    if (onSendMessage) {
-      onSendMessage(`${currentPlayer?.name} answered: ${answerInput}`);
-    }
-
     setAnswerInput('');
 
     // Celebrate with hearts
@@ -243,18 +224,6 @@ export default function TruthOrDareGame({ room, username, onSendMessage }: Truth
       };
       setGameState(newState);
       triggerGameEvent('game-state-update', newState);
-
-      if (onSendMessage) {
-        const sortedPlayers = gameState.players
-          .map(p => ({ name: p.name, score: gameState.scores[p.id] || 0 }))
-          .sort((a, b) => b.score - a.score);
-        
-        if (sortedPlayers[0].score > sortedPlayers[1].score) {
-          onSendMessage(`🏆 Game Over! ${sortedPlayers[0].name} wins!`);
-        } else {
-          onSendMessage(`🏆 Game Over! It's a tie!`);
-        }
-      }
       return;
     }
 
@@ -272,11 +241,6 @@ export default function TruthOrDareGame({ room, username, onSendMessage }: Truth
 
     setGameState(newState);
     triggerGameEvent('game-state-update', newState);
-
-    const nextPlayer = gameState.players.find(p => p.id === gameState.otherPlayerId);
-    if (onSendMessage) {
-      onSendMessage(`Round ${newRound}: ${nextPlayer?.name}'s turn!`);
-    }
   };
 
   // Reset game
@@ -303,10 +267,6 @@ export default function TruthOrDareGame({ room, username, onSendMessage }: Truth
     triggerGameEvent('game-state-update', resetState);
     setQuestionInput('');
     setAnswerInput('');
-
-    if (onSendMessage) {
-      onSendMessage('🔄 Game reset!');
-    }
   };
 
   if (!mounted) return null;

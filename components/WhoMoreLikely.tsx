@@ -129,10 +129,6 @@ export default function WhoMoreLikely({ room, username, onSendMessage }: WhoMore
 
     setGameState(newState);
     triggerGameEvent('game-state-update', newState);
-
-    if (onSendMessage) {
-      onSendMessage(`🎮 Game started! Round 1`);
-    }
   };
 
   const handleVote = (votedForPlayerId: string) => {
@@ -174,18 +170,6 @@ export default function WhoMoreLikely({ room, username, onSendMessage }: WhoMore
       };
       setGameState(newState);
       triggerGameEvent('game-state-update', newState);
-
-      if (onSendMessage) {
-        const sortedPlayers = gameState.players
-          .map((p) => ({ name: p.name, score: gameState.scores[p.id] || 0 }))
-          .sort((a, b) => b.score - a.score);
-
-        if (sortedPlayers[0].score > sortedPlayers[1].score) {
-          onSendMessage(`🏆 Game Over! ${sortedPlayers[0].name} wins!`);
-        } else {
-          onSendMessage(`🏆 Game Over! It's a tie!`);
-        }
-      }
       return;
     }
 
@@ -201,10 +185,6 @@ export default function WhoMoreLikely({ room, username, onSendMessage }: WhoMore
 
     setGameState(newState);
     triggerGameEvent('game-state-update', newState);
-
-    if (onSendMessage) {
-      onSendMessage(`Round ${newRound} started!`);
-    }
   };
 
   const handleResetGame = () => {
@@ -224,10 +204,6 @@ export default function WhoMoreLikely({ room, username, onSendMessage }: WhoMore
 
     setGameState(resetState);
     triggerGameEvent('game-state-update', resetState);
-
-    if (onSendMessage) {
-      onSendMessage('🔄 Game reset!');
-    }
   };
 
   if (!mounted) return null;
