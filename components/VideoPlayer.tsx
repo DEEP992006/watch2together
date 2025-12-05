@@ -3,12 +3,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Pusher from 'pusher-js';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Upload, Send, Users, Video, Youtube, Search, X, TrendingUp, Clock, Filter, PlayCircle, Smile } from 'lucide-react';
+import { Heart, Upload, Send, Users, Video, Youtube, Search, X, TrendingUp, Clock, Filter, PlayCircle, Smile, Gamepad2 } from 'lucide-react';
 import YouTube, { YouTubeProps } from 'react-youtube';
 import axios from 'axios';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import { formatDistanceToNow } from 'date-fns';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+import TruthOrDareGame from './TruthOrDareGame';
+import WhoMoreLikely from './WhoMoreLikely';
+import WouldYouRather from './WouldYouRather';
+import GameSelector, { GameMode } from './GameSelector';
+import { saveMessage, getChatHistory } from '@/app/actions/chat';
+import SectionTabs, { SectionType } from './SectionTabs';
+import BasicPanel from './BasicPanel';
 
 interface VideoEvent {
   type: 'play' | 'pause' | 'seek' | 'load-video';
@@ -71,6 +78,10 @@ export default function VideoPlayer() {
   const [userEmojis, setUserEmojis] = useState<string[]>(DEFAULT_EMOJIS);
   const [showEmojiEditor, setShowEmojiEditor] = useState(false);
   const [showChatEmojiPicker, setShowChatEmojiPicker] = useState(false);
+  const [currentSection, setCurrentSection] = useState<SectionType>('video');
+  const [mode, setMode] = useState<'video' | 'game'>('video');
+  const [gameMode, setGameMode] = useState<GameMode | null>(null);
+  const [showGameSelector, setShowGameSelector] = useState(false);
   const isReceivingUpdate = useRef(false);
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const senderIdRef = useRef(Math.random().toString(36));
@@ -90,6 +101,23 @@ export default function VideoPlayer() {
         console.error('Failed to load emojis:', e);
       }
     }
+
+    // Load chat history from database
+    const loadChatHistory = async () => {
+      try {
+        const result = await getChatHistory(100);
+        if (result.success && result.messages && Array.isArray(result.messages)) {
+          const formattedMessages = result.messages.map(
+            (msg: { username: string; message: string }) => `${msg.username}: ${msg.message}`
+          );
+          setMessages(formattedMessages);
+        }
+      } catch (error) {
+        console.error('Failed to load chat history:', error);
+      }
+    };
+
+    loadChatHistory();
   }, []);
 
   useEffect(() => {
@@ -209,6 +237,14 @@ export default function VideoPlayer() {
       setTimeout(() => {
         setEmojiReactions((prev) => prev.filter((r) => r.id !== id));
       }, 3000);
+    });
+
+    channel.bind('game-mode-change', (data: { gameMode: GameMode; senderId: string }) => {
+      // Ignore events sent by this client
+      if (data.senderId === senderIdRef.current) return;
+      
+      setGameMode(data.gameMode);
+      setMode('game');
     });
 
     return () => {
@@ -432,16 +468,56 @@ export default function VideoPlayer() {
     }, 200);
   };
 
-  const sendChat = () => {
+  const sendChat = async () => {
     if (!chatInput.trim() || !username.trim()) return;
-    triggerEvent('chat-message', {
-      user: username,
-      text: chatInput,
-      senderId: senderIdRef.current,
-    });
-    setMessages((prev) => [...prev, `${username}: ${chatInput}`]);
+    
+    const messageText = chatInput;
+    
+    // Update UI immediately (optimistic update)
+    setMessages((prev) => [...prev, `${username}: ${messageText}`]);
     setChatInput('');
     setShowChatEmojiPicker(false);
+    
+    // Send to other users via Pusher
+    triggerEvent('chat-message', {
+      user: username,
+      text: messageText,
+      senderId: senderIdRef.current,
+    });
+    
+    // Save to database in the background using server action
+    try {
+      const result = await saveMessage(username, messageText);
+      if (!result.success) {
+        console.error('Failed to save message:', result.error);
+      }
+    } catch (error) {
+      console.error('Failed to save message to database:', error);
+    }
+  };
+
+  const sendGameMessage = async (text: string) => {
+    if (!username.trim()) return;
+    
+    // Update UI immediately
+    setMessages((prev) => [...prev, `Game: ${text}`]);
+    
+    // Send to other users via Pusher
+    triggerEvent('chat-message', {
+      user: 'Game',
+      text: text,
+      senderId: senderIdRef.current,
+    });
+    
+    // Save to database in the background using server action
+    try {
+      const result = await saveMessage('Game', text);
+      if (!result.success) {
+        console.error('Failed to save game message:', result.error);
+      }
+    } catch (error) {
+      console.error('Failed to save game message to database:', error);
+    }
   };
 
   const onEmojiClick = (emojiData: EmojiClickData) => {
@@ -558,17 +634,18 @@ export default function VideoPlayer() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Your Name
+                    Who are you?
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && startWatching()}
-                    placeholder="Enter your name"
-                    className="w-full px-4 py-3 rounded-xl border-2 border-rose-200 focus:border-rose-500 focus:ring-4 focus:ring-rose-200 outline-none transition-all text-base"
+                    className="w-full px-4 py-3 rounded-xl border-2 border-rose-200 focus:border-rose-500 focus:ring-4 focus:ring-rose-200 outline-none transition-all text-base bg-white"
                     autoFocus
-                  />
+                  >
+                    <option value="">Select your name</option>
+                    <option value="Deep">Deep</option>
+                    <option value="Tara">Tara</option>
+                  </select>
                 </div>
                 
                 <div className="bg-purple-50 p-4 rounded-xl">
@@ -597,7 +674,7 @@ export default function VideoPlayer() {
 
       <div className="relative z-10 container mx-auto px-2 sm:px-4 py-2 sm:py-3 lg:py-4 max-h-screen">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 sm:gap-3 lg:gap-4">
-          {/* Video Section */}
+          {/* Left Panel - Content based on section */}
           <motion.div
             initial={{ x: -20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
@@ -605,44 +682,66 @@ export default function VideoPlayer() {
             className="lg:col-span-2"
           >
             <div className="bg-white/80 backdrop-blur-xl rounded-xl md:rounded-2xl shadow-xl p-2 sm:p-3 md:p-4 border border-rose-100">
+              {/* Section Tabs */}
+              <SectionTabs 
+                currentSection={currentSection} 
+                onSectionChange={(section) => {
+                  setCurrentSection(section);
+                  if (section === 'video') {
+                    setMode('video');
+                  } else if (section === 'games') {
+                    setMode('game');
+                    setShowGameSelector(true);
+                  }
+                }} 
+              />
+
+              {/* Content based on selected section */}
+              {currentSection === 'video' && (
+                <>
               <div className="flex items-center justify-between mb-2 sm:mb-3">
                 <div className="flex items-center gap-2">
                   <Video className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500" />
-                  <h2 className="text-base sm:text-lg md:text-xl font-semibold text-gray-800">Video Player</h2>
+                  <h2 className="text-base sm:text-lg md:text-xl font-semibold text-gray-800">
+                    Video Player
+                  </h2>
                 </div>
                 
-                {/* Change Video Button - Same row as heading */}
-                {videoSrc && (
-                  <div className="flex gap-2">
-                    <label className="cursor-pointer">
-                      <motion.div
+                <div className="flex gap-2">
+                  {/* Change Video Button - Only show in video mode */}
+                  {videoSrc && (
+                    <div className="flex gap-2">
+                      <label className="cursor-pointer">
+                        <motion.div
+                          whileHover={{ scale: 1.05, boxShadow: '0 10px 25px rgba(236, 72, 153, 0.3)' }}
+                          whileTap={{ scale: 0.95 }}
+                          className="bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 px-4 py-2.5 rounded-full font-semibold text-sm shadow-lg flex items-center gap-2 text-white transition-all"
+                        >
+                          <Upload className="w-4 h-4" />
+                          <span className="hidden sm:inline">Local</span>
+                        </motion.div>
+                        <input
+                          type="file"
+                          accept="video/*"
+                          onChange={handleFileChange}
+                          className="hidden"
+                        />
+                      </label>
+                      <motion.button
                         whileHover={{ scale: 1.05, boxShadow: '0 10px 25px rgba(236, 72, 153, 0.3)' }}
                         whileTap={{ scale: 0.95 }}
+                        onClick={() => setShowSearch(true)}
                         className="bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 px-4 py-2.5 rounded-full font-semibold text-sm shadow-lg flex items-center gap-2 text-white transition-all"
                       >
-                        <Upload className="w-4 h-4" />
-                        <span className="hidden sm:inline">Local</span>
-                      </motion.div>
-                      <input
-                        type="file"
-                        accept="video/*"
-                        onChange={handleFileChange}
-                        className="hidden"
-                      />
-                    </label>
-                    <motion.button
-                      whileHover={{ scale: 1.05, boxShadow: '0 10px 25px rgba(236, 72, 153, 0.3)' }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => setShowSearch(true)}
-                      className="bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 px-4 py-2.5 rounded-full font-semibold text-sm shadow-lg flex items-center gap-2 text-white transition-all"
-                    >
-                      <Youtube className="w-4 h-4" />
-                      <span className="hidden sm:inline">YouTube</span>
-                    </motion.button>
-                  </div>
-                )}
+                        <Youtube className="w-4 h-4" />
+                        <span className="hidden sm:inline">YouTube</span>
+                      </motion.button>
+                    </div>
+                  )}
+                </div>
               </div>
 
+              {/* Video Player Content */}
               {!videoSrc ? (
                 <div id="video-container" className="aspect-video bg-gradient-to-br from-rose-100 to-purple-100 rounded-xl md:rounded-2xl flex flex-col items-center justify-center border-2 border-dashed border-rose-300 p-4 relative">
                   {/* Only show video type switcher when no video is loaded */}
@@ -799,8 +898,8 @@ export default function VideoPlayer() {
                   </div>
               )}
 
-              {/* Emoji Reaction Bar */}
-              {videoSrc && (
+              {/* Emoji Reaction Bar - Only show in video mode */}
+              {mode === 'video' && videoSrc && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -867,6 +966,67 @@ export default function VideoPlayer() {
                     </motion.div>
                   )}
                 </motion.div>
+              )}
+                </>
+              )}
+              
+              {/* Games Section */}
+              {currentSection === 'games' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between mb-2 sm:mb-3">
+                    <div className="flex items-center gap-2">
+                      <Gamepad2 className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500" />
+                      <h2 className="text-base sm:text-lg md:text-xl font-semibold text-gray-800">
+                        {gameMode === 'truthDare' 
+                          ? 'Truth or Dare' 
+                          : gameMode === 'whoMoreLikely'
+                            ? "Who's More Likely To"
+                            : gameMode === 'wouldYouRather'
+                              ? 'Would You Rather'
+                              : 'Games'}
+                      </h2>
+                    </div>
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setShowGameSelector(true)}
+                      className="bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 px-4 py-2.5 rounded-full font-semibold text-sm shadow-lg flex items-center gap-2 text-white transition-all"
+                    >
+                      <Gamepad2 className="w-4 h-4" />
+                      <span className="hidden sm:inline">Change Game</span>
+                    </motion.button>
+                  </div>
+
+                  {gameMode === 'truthDare' ? (
+                    <TruthOrDareGame 
+                      room={room} 
+                      username={username}
+                      onSendMessage={sendGameMessage}
+                    />
+                  ) : gameMode === 'whoMoreLikely' ? (
+                    <WhoMoreLikely 
+                      room={room} 
+                      username={username}
+                      onSendMessage={sendGameMessage}
+                    />
+                  ) : gameMode === 'wouldYouRather' ? (
+                    <WouldYouRather 
+                      room={room} 
+                      username={username}
+                      onSendMessage={sendGameMessage}
+                    />
+                  ) : (
+                    <div className="text-center py-12">
+                      <Gamepad2 className="w-16 h-16 text-rose-300 mx-auto mb-4" />
+                      <p className="text-gray-600">Select a game to play!</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Basic Section */}
+              {currentSection === 'basic' && (
+                <BasicPanel username={username} />
               )}
             </div>
           </motion.div>
@@ -1160,6 +1320,29 @@ export default function VideoPlayer() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Game Selector Modal */}
+      <GameSelector
+        isOpen={showGameSelector}
+        onClose={() => setShowGameSelector(false)}
+        onSelectGame={(selectedGame) => {
+          setGameMode(selectedGame);
+          setMode('game');
+          
+          // Sync game mode to other players
+          triggerEvent('game-mode-change', {
+            gameMode: selectedGame,
+            senderId: senderIdRef.current,
+          });
+          
+          const gameNames = {
+            truthDare: 'Truth or Dare',
+            whoMoreLikely: "Who's More Likely To",
+            wouldYouRather: 'Would You Rather',
+          };
+          sendGameMessage(`🎮 ${gameNames[selectedGame]} game started!`);
+        }}
+      />
     </div>
   );
 }
